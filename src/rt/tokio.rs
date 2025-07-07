@@ -108,10 +108,6 @@ where
     Fut::Output: Send + 'static,
 {
     fn execute(&self, fut: Fut) {
-        #[cfg(feature = "tracing")]
-        tokio::spawn(fut.in_current_span());
-
-        #[cfg(not(feature = "tracing"))]
         tokio::spawn(fut);
     }
 }
