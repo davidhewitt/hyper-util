@@ -443,7 +443,16 @@ impl<T: Poolable, K: Key> PoolInner<T, K> {
             pool_drop_notifier: rx,
         };
 
-        self.exec.execute(interval);
+        tracing::span!(
+            parent: None,
+            tracing::Level::DEBUG,
+            "idle interval task",
+        )
+        .in_scope(|| {
+            // This is a task that will run in the background, checking
+            // for idle connections to evict.
+            self.exec.execute(interval);
+        });
     }
 }
 

@@ -360,7 +360,9 @@ where
             drop(pooled);
         } else {
             let on_idle = poll_fn(move |cx| pooled.poll_ready(cx)).map(|_| ());
-            self.exec.execute(on_idle);
+            tracing::span!(parent: None, tracing::Level::DEBUG, "bg pool insert").in_scope(|| {
+                self.exec.execute(on_idle);
+            });
         }
 
         Ok(res)
@@ -444,7 +446,10 @@ where
                         });
                     // An execute error here isn't important, we're just trying
                     // to prevent a waste of a socket...
-                    self.exec.execute(bg);
+                    tracing::span!(parent: None, tracing::Level::DEBUG, "finish connection")
+                        .in_scope(|| {
+                            self.exec.execute(bg);
+                        });
                 }
                 Ok(checked_out)
             }
@@ -550,10 +555,12 @@ where
                                     trace!(
                                         "http2 handshake complete, spawning background dispatcher task"
                                     );
-                                    executor.execute(
-                                        conn.map_err(|e| debug!("client connection error: {}", e))
-                                            .map(|_| ()),
-                                    );
+                                    tracing::span!(parent: None, tracing::Level::DEBUG, "background dispatcher task").in_scope(|| {
+                                        executor.execute(
+                                            conn.map_err(|e| debug!("client connection error: {}", e))
+                                                .map(|_| ()),
+                                        );
+                                    });
 
                                     // Wait for 'conn' to ready up before we
                                     // declare this tx as usable
@@ -581,20 +588,23 @@ where
                                     let (err_tx, err_rx) = tokio::sync::oneshot::channel();
                                     // Spawn the connection task in the background using the executor.
                                     // The task manages the HTTP/1.1 connection, including upgrades (e.g., WebSocket).
-                                    // Errors are sent via err_tx to ensure they can be checked if the sender (tx) fails.
-                                    executor.execute(
-                                        conn.with_upgrades()
-                                            .map_err(|e| {
-                                                // Log the connection error at debug level for diagnostic purposes.
-                                                debug!("client connection error: {:?}", e);
-                                                // Log that the error is being sent to the error channel.
-                                                trace!("sending connection error to error channel");
-                                                // Send the error via the oneshot channel, ignoring send failures
-                                                // (e.g., if the receiver is dropped, which is handled later).
-                                                let _ =err_tx.send(e);
-                                            })
-                                            .map(|_| ()),
-                                    );
+                                    // Errors are sent via err_tx to ensure they can be checked if
+                                    // the sender (tx) fails.
+                                    tracing::span!(parent: None, tracing::Level::DEBUG, "background dispatcher task").in_scope(|| {
+                                        executor.execute(
+                                            conn.with_upgrades()
+                                                .map_err(|e| {
+                                                    // Log the connection error at debug level for diagnostic purposes.
+                                                    debug!("client connection error: {:?}", e);
+                                                    // Log that the error is being sent to the error channel.
+                                                    trace!("sending connection error to error channel");
+                                                    // Send the error via the oneshot channel, ignoring send failures
+                                                    // (e.g., if the receiver is dropped, which is handled later).
+                                                    let _ = err_tx.send(e);
+                                                })
+                                                .map(|_| ())
+                                        )
+                                    });
                                     // Log that the client is waiting for the connection to be ready.
                                     // Readiness indicates the sender (tx) can accept a request without blocking.
                                     trace!("waiting for connection to be ready");
